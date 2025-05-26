@@ -1,0 +1,240 @@
+PyMISES Aerodynamic Expert Guide
+1. Mathematical Foundation
+1.1 Euler Equations
+The core of PyMISES is based on the steady, two-dimensional Euler equations formulated in integral form:
+Mass Conservation:
+? ?q·n ds = 0
+Momentum Conservation:
+?(?(q·n)q + pn) ds = 0
+Energy Conservation:
+?(?(q·n)h) ds = 0
+Where:
+* ? is density
+* q is velocity vector
+* n is unit normal vector
+* p is pressure
+* h is total enthalpy
+1.2 Streamline-Based Discretization
+The unique aspect of PyMISES is the use of an intrinsic streamline grid where:
+1. One set of coordinate lines corresponds to streamlines
+2. There is no convection across the corresponding faces of conservation cells
+3. Mass flux and stagnation enthalpy are constant along streamtubes
+This leads to several advantages:
+* Reduction from 4 to 2 unknowns per grid node
+* No numerical diffusion of entropy or enthalpy across streamlines
+* Faithful reproduction of analytic information propagation mechanisms
+* Natural adaptation to the flow field
+1.3 Artificial Dissipation
+For transonic flows, artificial dissipation is implemented as a bulk viscosity-like term:
+? = { 0,                    M < Mc
+    { Cd(1-(Mc/M)²)/(2M²), M > Mc
+Where:
+* Mc is threshold Mach number (typically 0.9-0.95)
+* Cd is dissipation coefficient (typically 0.5-1.0)
+This approach provides:
+* Stable shock capturing
+* Prevention of expansion shocks
+* Minimal numerical diffusion in subsonic regions
+1.4 Integral Boundary Layer Equations
+The viscous effects are modeled using integral boundary layer equations:
+Momentum Integral Equation:
+?(d?/dx) = (Cf/2) - (H+2-M²?)(?/U?)(dU?/dx)
+Shape Parameter Equation:
+?(dH*/dx) = 2CD/H* - Cf/2·(2H**/H* + 1 - H) - ?/U?·(dU?/dx)
+Where:
+* ? is momentum thickness
+* ?* is displacement thickness
+* H = ?*/? is shape parameter
+* H* is kinetic energy shape parameter
+* H** is density thickness shape parameter
+* Cf is skin friction coefficient
+* CD is dissipation coefficient
+* Ue is edge velocity
+* Me is edge Mach number
+1.5 Closure Relations
+1.5.1 Laminar Closure
+For laminar flow, closure relations are based on the Falkner-Skan profile family:
+H* = 1.515 + 0.076(Hk-4)²/Hk,  Hk < 4
+H* = 1.515 + 0.040(Hk-4)²/Hk,  Hk > 4
+
+Cf·Re? = -0.067 + 0.01977(7.4-Hk)²/(Hk-1)
+
+2CD/H* = 0.207 + 0.00205(4-Hk)?·?, Hk < 4
+2CD/H* = 0.207 - 0.003(Hk-4)², Hk > 4
+Where Hk is the kinematic shape parameter.
+1.5.2 Turbulent Closure
+For turbulent flow:
+Cf = 0.3e?¹·³³Hk/(log??(Re?))¹·????·³¹Hk · Fc
+Where Fc is a compressibility correction.
+The energy shape parameter is given by:
+H* = (1.505 + 400/Re?) / Hk·(1 + (H?-H)²(0.04 + 0.007ln(Re?)/Hk))
+The dissipation coefficient uses a lag-entrainment approach:
+CD = Cf·Us² + CT(1-Us)
+Where CT is a maximum shear stress coefficient that follows a lag equation to account for non-equilibrium effects:
+? dCT/dx = KC(CT_EQ^(1/2) - CT^(1/2))
+With KC = 5.6 as the lag constant and ? as the boundary layer thickness.
+1.6 Transition Prediction
+Based on Drela's modified Abu-Ghannam/Shaw transition criterion, transition is predicted using a hybrid approach combining the e? method with a bypass transition model:
+1.6.1 Amplification Factor Method
+The amplification factor n is governed by:
+?(dn/dx) = f(H,Re?) + g(H,Re?)
+Where:
+* f(H,Re?) is the Orr-Sommerfeld-based TS wave growth rate
+* g(H,Re?) is a bypass transition term that activates as Re? approaches a critical value
+The g term is defined as:
+g(H,Re?) = { 0             r < 0
+           { A(3r² - 2r³)  0 < r < 1
+           { A             r > 1
+
+r = (1/B)((Re?/Re?s) - 1) + 1/2
+Where:
+* A = 0.10 (amplification rate constant)
+* B = 0.30 (ramp width parameter)
+* Re?s is the critical Reynolds number
+1.6.2 Critical Reynolds Number
+The critical Reynolds number is modified from the original Abu-Ghannam/Shaw formulation:
+Re?s(H,ñcrit) = 155 + 89.0[0.25tanh(10/(H-1) - 5.5) + 1](ñcrit)^1.25
+Where ñcrit is related to the turbulence level ? by:
+?' = 2.7tanh(?/2.7)
+ñcrit(?) = -8.43 - 2.4ln(?'/100)
+This formulation addresses the ill-posedness of the original AGS criterion by:
+1. Using H instead of ? to parameterize boundary layer instability
+2. Adding a smooth transition from stability to instability
+3. Accounting for viscous-inviscid interaction effects
+1.6.3 Initial Turbulence Level
+For transition modeling in varying edge velocity fields (e.g., turbine cascades), the amplification equation is modified to:
+(dn?/dx) + (dlnue/dx) = (1/?)[f(H,Re?) + g(H,Re?)]
+This accounts for the acceleration or deceleration of the external flow.
+1.7 Viscous-Inviscid Coupling
+Coupling is achieved through the displacement body concept:
+* Inviscid flow sees a body displaced from the physical body by ?*
+* Boundary layer equations are integrated into the global Newton system
+* No separate iteration between solvers
+This provides robust convergence even with separation bubbles present.
+1.8 Inverse Design Framework
+The inverse design capability includes:
+Full Inverse:
+* Pressure specified on entire airfoil
+* Leading and trailing edge closure constraints
+* Free parameters for well-posed problem
+Mixed Inverse:
+* Pressure specified on part of airfoil
+* Geometry fixed elsewhere
+* Continuity enforced at segment boundaries
+* Additional free parameters for segment continuity
+2. Numerical Solution Procedure
+2.1 Newton Method
+The coupled system of equations is solved using Newton's method:
+[dF/dU]·?U = -F(U)
+U^(v+1) = U^(v) + ?U
+Where:
+* F(U) is the residual vector
+* U is the solution vector (?, ?n at each node)
+* [dF/dU] is the Jacobian matrix
+* v is the iteration index
+2.2 Jacobian Structure
+The Jacobian matrix has a block structure with:
+* Four block diagonals (A, B, C, Z) for local variables
+* Additional rows/columns for global variables and constraints
+* Typical size ~4000-10000 equations
+2.3 Linear System Solution
+The linear system is solved using block Gaussian elimination:
+* Forward sweep to eliminate Z and B blocks
+* Backward sweep to eliminate modified C blocks
+* Separate solution for global variables
+* Back-substitution for local variables
+2.4 Convergence Acceleration
+Convergence is accelerated through:
+* Proper under-relaxation in early iterations (r < 1)
+* Full Newton steps (r = 1) once near solution
+* Grid redistribution when needed
+* Careful initialization strategies
+3. Implementation Guidelines
+3.1 Grid Generation
+1. Start with elliptic grid generation (Thompson method)
+2. Initialize streamlines for incompressible flow
+3. Allow grid adaptation during Newton iterations
+4. Redistribute grid periodically to maintain quality
+5. Special treatment for leading edge stagnation point
+3.2 Boundary Conditions
+1. Wall Boundary Conditions:
+o No-flow-through (streamline coincides with wall)
+o Displacement thickness offset in viscous mode
+2. Far-Field Conditions:
+o Pressure specification based on potential flow (vortex + source + doublet)
+o Consistent inflow/outflow angle specification
+o Treatment of wake streamline
+3. Cascade Conditions:
+o Periodicity in tangential direction
+o Specified inlet flow angle
+o Kutta condition at trailing edge
+3.3 Stability Considerations
+1. Enhanced artificial dissipation near shocks
+2. Pressure correction to eliminate grid sawtooth modes
+3. Careful treatment of stagnation points
+4. Edge velocity correction in boundary layer coupling
+5. Special attention to transition region to avoid numerical instabilities
+3.4 Performance Metrics
+1. Lift and Moment:
+o Integrated from surface pressure distribution
+o Consistent with far-field circulation
+2. Drag Components:
+o Profile drag from momentum deficit in wake
+o Wave drag from entropy increase across shock
+o Induced drag from far-field analysis
+3. Boundary Layer Parameters:
+o Displacement thickness (?*)
+o Momentum thickness (?)
+o Shape factor (H)
+o Separation locations
+4. Validation Test Cases
+The following test cases are recommended for validation:
+1. Joukowski airfoil: Compare with exact incompressible solution
+2. RAE 2822 (Case 6): Attached transonic flow with shock
+3. RAE 2822 (Case 10): Transonic flow with shock-induced separation
+4. NACA 4412 at high angle: Trailing edge separation
+5. LA203A at low Reynolds number: Transitional separation bubbles
+6. Supercritical cascade: For periodicity and shock capturing
+5. Common Issues and Remedies
+1. Convergence Difficulties:
+o Increase artificial dissipation (Cd)
+o Lower threshold Mach number (Mc)
+o Use stronger under-relaxation
+o Improve initial grid quality
+2. Shock Instabilities:
+o Refine grid near shock
+o Increase artificial dissipation locally
+o Smooth pressure distribution in early iterations
+3. Separation Problems:
+o Carefully tune boundary layer closure parameters
+o Improve grid resolution in separation region
+o Modify transition criteria if needed
+4. Transition Prediction Issues:
+o Use the modified transition model based on H instead of ?
+o Verify proper coupling between boundary layer and inviscid flow
+o Consider appropriate transition ramp parameters (A and B)
+5. Inverse Design Issues:
+o Smooth target pressure distribution
+o Add more degrees of freedom
+o Enforce reasonable geometric constraints
+o Start from well-converged direct solution
+6. Advanced Features
+6.1 Multi-Point Design
+For multi-point design:
+1. Perform inverse design at primary design point
+2. Check performance at off-design conditions
+3. Modify target pressure to improve off-design performance
+4. Repeat until satisfactory compromise is achieved
+6.2 Performance Optimization
+For direct optimization:
+1. Parameterize geometry (e.g., control points)
+2. Define objective function (e.g., L/D, Cd at fixed Cl)
+3. Use gradient-based methods leveraging sensitivity information from Newton solver
+4. Apply constraints on geometry and aerodynamic parameters
+6.3 Sensitivity Analysis
+Newton method automatically provides sensitivity information:
+* dCl/d?: Lift curve slope
+* dCd/dM: Drag-divergence characteristics
+* dCm/dCl: Stability derivatives
+These can be used for design refinement without additional solutions.
+

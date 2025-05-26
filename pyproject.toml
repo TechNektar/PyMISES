@@ -1,0 +1,189 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymises"
+version = "0.1.0"
+description = "Python Multiple-Blade Interacting Streamtube Euler Solver"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "PyMISES Development Team", email = "pymises@example.com"}
+]
+maintainers = [
+    {name = "PyMISES Development Team", email = "pymises@example.com"}
+]
+keywords = [
+    "aerodynamics",
+    "computational-fluid-dynamics",
+    "euler-solver",
+    "boundary-layer",
+    "airfoil",
+    "turbomachinery",
+    "mises"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Visualization"
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+    "matplotlib>=3.3.0",
+    "pandas>=1.3.0",
+    "h5py>=3.0.0",
+    "ezdxf>=0.17.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.900",
+    "pre-commit>=2.15.0"
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+    "myst-parser>=0.15"
+]
+testing = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "pytest-xdist>=2.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/PyMISES"
+Documentation = "https://pymises.readthedocs.io/"
+Repository = "https://github.com/yourusername/PyMISES.git"
+"Bug Tracker" = "https://github.com/yourusername/PyMISES/issues"
+Changelog = "https://github.com/yourusername/PyMISES/blob/main/CHANGELOG.md"
+
+[project.scripts]
+pymises = "pymises.ui.cli:main"
+
+[tool.setuptools]
+packages = ["pymises"]
+
+[tool.setuptools.package-data]
+pymises = ["data/*", "examples/*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+]
+python_files = [
+    "test_*.py",
+    "*_test.py"
+]
+python_classes = [
+    "Test*"
+]
+python_functions = [
+    "test_*"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "matplotlib.*",
+    "scipy.*",
+    "h5py.*",
+    "ezdxf.*"
+]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["pymises"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "setup.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:"
+]
+show_missing = true
+precision = 2
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",  # whitespace before ':'
+    "W503",  # line break before binary operator
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "docs/source/conf.py",
+    "old",
+    "build",
+    "dist",
+    ".venv",
+    "venv"
+]

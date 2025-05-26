@@ -1,0 +1,30 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+
+# Include configuration files
+include pyproject.toml
+include pytest.ini
+include requirements.txt
+
+# Include data files
+recursive-include pymises/data *
+recursive-include examples *
+recursive-include docs *
+
+# Exclude development and build files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .coverage*
+global-exclude .pytest_cache
+prune build
+prune dist
+prune *.egg-info
+prune venv
+prune .venv
+prune logs
