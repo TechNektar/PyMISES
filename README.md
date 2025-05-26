@@ -27,7 +27,7 @@ A Python implementation of the MISES solver originally developed by Mark Drela a
 ### Install from source
 
 ```bash
-git clone https://github.com/yourusername/PyMISES.git
+git clone https://github.com/TechNektar/PyMISES.git
 cd PyMISES
 pip install -e .
 ```
@@ -147,7 +147,7 @@ If you use PyMISES in your research, please cite:
   title={PyMISES: Python Multiple-Blade Interacting Streamtube Euler Solver},
   author={PyMISES Development Team},
   year={2024},
-  url={https://github.com/yourusername/PyMISES}
+  url={https://github.com/TechNektar/PyMISES}
 }
 ```
 
@@ -168,9 +168,9 @@ If you use PyMISES in your research, please cite:
 
 ## Support
 
-- **Issues**: Report bugs and request features via [GitHub Issues](https://github.com/yourusername/PyMISES/issues)
-- **Discussions**: Join the community discussion on [GitHub Discussions](https://github.com/yourusername/PyMISES/discussions)
-- **Email**: For private inquiries, contact [your-email@example.com]
+- **Issues**: Report bugs and request features via [GitHub Issues](https://github.com/TechNektar/PyMISES/issues)
+- **Discussions**: Join the community discussion on [GitHub Discussions](https://github.com/TechNektar/PyMISES/discussions)
+- **Email**: For private inquiries, contact info@technektar.com
 
 ---
 

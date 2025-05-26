@@ -9,10 +9,10 @@ description = "Python Multiple-Blade Interacting Streamtube Euler Solver"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "PyMISES Development Team", email = "pymises@example.com"}
+    {name = "PyMISES Development Team", email = "info@technektar.com"}
 ]
 maintainers = [
-    {name = "PyMISES Development Team", email = "pymises@example.com"}
+    {name = "PyMISES Development Team", email = "info@technektar.com"}
 ]
 keywords = [
     "aerodynamics",
@@ -70,11 +70,11 @@ testing = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/PyMISES"
+Homepage = "https://github.com/TechNektar/PyMISES"
 Documentation = "https://pymises.readthedocs.io/"
-Repository = "https://github.com/yourusername/PyMISES.git"
-"Bug Tracker" = "https://github.com/yourusername/PyMISES/issues"
-Changelog = "https://github.com/yourusername/PyMISES/blob/main/CHANGELOG.md"
+Repository = "https://github.com/TechNektar/PyMISES.git"
+"Bug Tracker" = "https://github.com/TechNektar/PyMISES/issues"
+Changelog = "https://github.com/TechNektar/PyMISES/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pymises = "pymises.ui.cli:main"

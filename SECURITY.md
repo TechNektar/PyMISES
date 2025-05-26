@@ -15,7 +15,7 @@ If you discover a security vulnerability in PyMISES, please report it responsibl
 ### Private Disclosure
 
 1. **Do NOT** create a public GitHub issue for security vulnerabilities
-2. Send an email to: security@technektar.com (replace with actual email)
+2. Send an email to: info@technektar.com
 3. Include the following information:
    - Description of the vulnerability
    - Steps to reproduce the issue
