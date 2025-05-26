@@ -179,3 +179,6 @@ secrets.yaml
 # Virtual environments
 pymises_env/
 pymises-env/
+
+# GitHub workflows (add separately with workflow scope)
+.github/workflows/
