@@ -172,6 +172,7 @@ class ModifiedAGSTransition(TransitionModel):
         Re_term = min(1.0, Re_theta / 300.0)
 
         # Base growth rate
+        # TODO: Verify this empirical correlation against Drela's original papers (e.g., ags2.pdf) for a more precise Orr-Sommerfeld based ts_wave_growth_rate.
         return 0.01 * Re_term * (1.0 + 5.0 * H_term**2)
 
     def bypass_growth_rate(self, r: float) -> float:
@@ -217,7 +218,7 @@ class ModifiedAGSTransition(TransitionModel):
         return f_rate + g_rate
 
     def update_amplification_factor(self, n: float, amplification_rate: float,
-                                   dx: float, edge_velocity_ratio: float = 1.0) -> float:
+                                   dx: float, theta: float, edge_velocity_ratio: float = 1.0) -> float:
         """
         Update amplification factor with edge velocity correction.
 
@@ -225,6 +226,7 @@ class ModifiedAGSTransition(TransitionModel):
             n: Current amplification factor.
             amplification_rate: Local amplification rate.
             dx: Streamwise distance step.
+            theta: Momentum thickness.
             edge_velocity_ratio: Ratio of new to old edge velocity.
 
         Returns:
@@ -233,8 +235,11 @@ class ModifiedAGSTransition(TransitionModel):
         # Edge velocity correction term (accounts for acceleration/deceleration effects)
         dln_ue = np.log(edge_velocity_ratio)
 
-        # Modified amplification equation (eq. 31 in Drela's paper)
-        dn = amplification_rate * dx - dln_ue
+        # Ensure theta is not zero to prevent division by zero
+        effective_theta = max(theta, 1e-9)
+
+        # Modified amplification equation (eq. 31 in Drela's paper, adapted for theta)
+        dn = (amplification_rate * dx / effective_theta) - dln_ue
 
         # Update amplification factor
         n_new = n + dn
@@ -433,15 +438,17 @@ class TransitionPredictor:
         model_name = self.model.__class__.__name__
         logger.info(f"Initialized transition predictor with {model_name} model")
 
-    def initialize(self, x: np.ndarray, edge_velocity: np.ndarray) -> None:
+    def initialize(self, x: np.ndarray, edge_velocity: np.ndarray, theta: np.ndarray) -> None:
         """Initialize transition predictor with grid and flow properties.
 
         Args:
             x: Streamwise coordinate array.
             edge_velocity: Edge velocity array.
+            theta: Momentum thickness array.
         """
         self.x = x
         self.edge_velocity = edge_velocity
+        self.theta = theta
         self.n_points = len(x)
 
         # Initialize arrays for transition prediction
@@ -450,120 +457,226 @@ class TransitionPredictor:
         self.transition_occurred = False
         self.transition_index = None
 
-        # Initialize model parameters
-        config = {
-            'amplification_constant': self.config.get('A', 0.1),
-            'ramp_width': self.config.get('B', 0.3),
-            'turbulence_level': self.config.get('turbulence_level', 0.01)
-        }
-        self.model = create_transition_model('modified_ags', config)
+        # The model itself is initialized in __init__ and should persist.
+        # Configuration specific to a run, if any, should be handled differently,
+        # or the model re-instantiated explicitly if needed.
+        logger.info(f"Re-initialized arrays for transition predictor for {self.n_points} points.")
 
-        logger.info(f"Initialized transition predictor with modified_ags model")
+    # TODO: This method is deprecated. Its logic was simplified and less robust. BoundaryLayerSolver should be updated to use predict_transition or a step-by-step equivalent.
+    # def update(self, i: int, H: float, Ue: float) -> None:
+    #     """
+    #     Update the transition prediction.
+    #
+    #     Args:
+    #         i: Current point index.
+    #         H: Current shape parameter.
+    #         Ue: Current edge velocity.
+    #     """
+    #     try:
+    #         # Ensure H and Ue are in reasonable ranges
+    #         H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
+    #         Ue = max(1e-8, Ue)  # Ensure Ue is positive
+    #
+    #         # Update n-factor
+    #         if i > 0 and i < len(self.n_factor):
+    #             # Compute amplification rate
+    #             if H > 2.2:  # Only amplify if H is above critical value
+    #                 try:
+    #                     # Use a simple approximation for dH/dx based on H
+    #                     dH_dx = 0.1 * (H - 2.2)  # Positive in adverse pressure gradient
+    #
+    #                     # Compute Reynolds number based on momentum thickness
+    #                     if hasattr(self, 'theta') and i < len(self.theta):
+    #                         theta_i = self.theta[i]
+    #                     else:
+    #                         # Use a default value if theta is not available
+    #                         theta_i = 1e-4
+    #
+    #                     Re_theta = self.reynolds_number * Ue * theta_i
+    #                     Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
+    #
+    #                     Re_theta_crit = self.model.critical_reynolds_number(H)
+    #                     Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
+    #
+    #                     # Compute amplification rate
+    #                     self.amplification_rate[i] = self.model.amplification_rate(H, Re_theta, Re_theta_crit)
+    #                 except Exception as e:
+    #                     logger.warning(f"Error computing amplification rate: {str(e)}")
+    #                     self.amplification_rate[i] = 0.0
+    #             else:
+    #                 self.amplification_rate[i] = 0.0
+    #
+    #             # Update n-factor with error handling
+    #             try:
+    #                 dx = self.x[i] - self.x[i-1]
+    #                 dx = max(1e-8, dx)  # Ensure positive dx
+    #                 self.n_factor[i] = self.n_factor[i-1] + self.amplification_rate[i] * dx
+    #             except Exception as e:
+    #                 logger.warning(f"Error updating n-factor: {str(e)}")
+    #                 self.n_factor[i] = self.n_factor[i-1]  # Use previous value if update fails
+    #         else:
+    #             # Initialize first point or handle out-of-bounds index
+    #             if i < len(self.amplification_rate):
+    #                 self.amplification_rate[i] = 0.0
+    #             if i < len(self.n_factor):
+    #                 self.n_factor[i] = 0.0
+    #     except Exception as e:
+    #         logger.warning(f"Transition prediction update failed: {str(e)}")
 
-    def update(self, i: int, H: float, Ue: float) -> None:
+    # TODO: This method is deprecated. Its logic for bypass/separation checks should be integrated into or superseded by the n-factor accumulation in predict_transition.
+    # def check_transition(self, x: float, Re_theta: float, H: float, dUe_dx: float) -> bool:
+    #     """Check if transition occurs at the current location.
+    #
+    #     Args:
+    #         x: Streamwise coordinate.
+    #         Re_theta: Reynolds number based on momentum thickness.
+    #         H: Shape parameter.
+    #         dUe_dx: Edge velocity gradient.
+    #
+    #     Returns:
+    #         True if transition occurs, False otherwise.
+    #     """
+    #     try:
+    #         # Ensure inputs are in reasonable ranges
+    #         x = max(0.0, x)  # Ensure x is non-negative
+    #         Re_theta = max(1.0, Re_theta)  # Ensure Re_theta is positive
+    #         H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
+    #
+    #         # Skip transition check near leading edge
+    #         if x < 0.05:
+    #             return False
+    #
+    #         try:
+    #             # Compute critical Reynolds number
+    #             Re_theta_crit = self.model.critical_reynolds_number(H, dUe_dx)
+    #             Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
+    #
+    #             # Check for bypass transition
+    #             if Re_theta > Re_theta_crit:
+    #                 logger.info(f"Bypass transition detected at x = {x:.3f}")
+    #                 self.transition_occurred = True
+    #                 return True
+    #         except Exception as e:
+    #             logger.warning(f"Error in bypass transition check: {str(e)}")
+    #
+    #         # Check for separation-induced transition
+    #         if H > 3.5 and Re_theta > 200:
+    #             logger.info(f"Separation-induced transition detected at x = {x:.3f}")
+    #             self.transition_occurred = True
+    #             return True
+    #     except Exception as e:
+    #         logger.warning(f"Transition check failed: {str(e)}")
+    #
+    #     return False
+
+    def is_transition(self) -> bool:
         """
-        Update the transition prediction.
+    # TODO: This method is deprecated. Its logic was simplified and less robust. BoundaryLayerSolver should be updated to use predict_transition or a step-by-step equivalent.
+    # def update(self, i: int, H: float, Ue: float) -> None:
+    #     """
+    #     Update the transition prediction.
+    #
+    #     Args:
+    #         i: Current point index.
+    #         H: Current shape parameter.
+    #         Ue: Current edge velocity.
+    #     """
+    #     try:
+    #         # Ensure H and Ue are in reasonable ranges
+    #         H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
+    #         Ue = max(1e-8, Ue)  # Ensure Ue is positive
+    #
+    #         # Update n-factor
+    #         if i > 0 and i < len(self.n_factor):
+    #             # Compute amplification rate
+    #             if H > 2.2:  # Only amplify if H is above critical value
+    #                 try:
+    #                     # Use a simple approximation for dH/dx based on H
+    #                     dH_dx = 0.1 * (H - 2.2)  # Positive in adverse pressure gradient
+    #
+    #                     # Compute Reynolds number based on momentum thickness
+    #                     if hasattr(self, 'theta') and i < len(self.theta):
+    #                         theta_i = self.theta[i]
+    #                     else:
+    #                         # Use a default value if theta is not available
+    #                         theta_i = 1e-4
+    #
+    #                     Re_theta = self.reynolds_number * Ue * theta_i
+    #                     Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
+    #
+    #                     Re_theta_crit = self.model.critical_reynolds_number(H)
+    #                     Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
+    #
+    #                     # Compute amplification rate
+    #                     self.amplification_rate[i] = self.model.amplification_rate(H, Re_theta, Re_theta_crit)
+    #                 except Exception as e:
+    #                     logger.warning(f"Error computing amplification rate: {str(e)}")
+    #                     self.amplification_rate[i] = 0.0
+    #             else:
+    #                 self.amplification_rate[i] = 0.0
+    #
+    #             # Update n-factor with error handling
+    #             try:
+    #                 dx = self.x[i] - self.x[i-1]
+    #                 dx = max(1e-8, dx)  # Ensure positive dx
+    #                 self.n_factor[i] = self.n_factor[i-1] + self.amplification_rate[i] * dx
+    #             except Exception as e:
+    #                 logger.warning(f"Error updating n-factor: {str(e)}")
+    #                 self.n_factor[i] = self.n_factor[i-1]  # Use previous value if update fails
+    #         else:
+    #             # Initialize first point or handle out-of-bounds index
+    #             if i < len(self.amplification_rate):
+    #                 self.amplification_rate[i] = 0.0
+    #             if i < len(self.n_factor):
+    #                 self.n_factor[i] = 0.0
+    #     except Exception as e:
+    #         logger.warning(f"Transition prediction update failed: {str(e)}")
 
-        Args:
-            i: Current point index.
-            H: Current shape parameter.
-            Ue: Current edge velocity.
-        """
-        try:
-            # Ensure H and Ue are in reasonable ranges
-            H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
-            Ue = max(1e-8, Ue)  # Ensure Ue is positive
-
-            # Update n-factor
-            if i > 0 and i < len(self.n_factor):
-                # Compute amplification rate
-                if H > 2.2:  # Only amplify if H is above critical value
-                    try:
-                        # Use a simple approximation for dH/dx based on H
-                        dH_dx = 0.1 * (H - 2.2)  # Positive in adverse pressure gradient
-
-                        # Compute Reynolds number based on momentum thickness
-                        if hasattr(self, 'theta') and i < len(self.theta):
-                            theta_i = self.theta[i]
-                        else:
-                            # Use a default value if theta is not available
-                            theta_i = 1e-4
-
-                        Re_theta = self.reynolds_number * Ue * theta_i
-                        Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
-
-                        Re_theta_crit = self.model.critical_reynolds_number(H)
-                        Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
-
-                        # Compute amplification rate
-                        self.amplification_rate[i] = self.model.amplification_rate(H, Re_theta, Re_theta_crit)
-                    except Exception as e:
-                        logger.warning(f"Error computing amplification rate: {str(e)}")
-                        self.amplification_rate[i] = 0.0
-                else:
-                    self.amplification_rate[i] = 0.0
-
-                # Update n-factor with error handling
-                try:
-                    dx = self.x[i] - self.x[i-1]
-                    dx = max(1e-8, dx)  # Ensure positive dx
-                    self.n_factor[i] = self.n_factor[i-1] + self.amplification_rate[i] * dx
-                except Exception as e:
-                    logger.warning(f"Error updating n-factor: {str(e)}")
-                    self.n_factor[i] = self.n_factor[i-1]  # Use previous value if update fails
-            else:
-                # Initialize first point or handle out-of-bounds index
-                if i < len(self.amplification_rate):
-                    self.amplification_rate[i] = 0.0
-                if i < len(self.n_factor):
-                    self.n_factor[i] = 0.0
-        except Exception as e:
-            logger.warning(f"Transition prediction update failed: {str(e)}")
-
-    def check_transition(self, x: float, Re_theta: float, H: float, dUe_dx: float) -> bool:
-        """Check if transition occurs at the current location.
-
-        Args:
-            x: Streamwise coordinate.
-            Re_theta: Reynolds number based on momentum thickness.
-            H: Shape parameter.
-            dUe_dx: Edge velocity gradient.
-
-        Returns:
-            True if transition occurs, False otherwise.
-        """
-        try:
-            # Ensure inputs are in reasonable ranges
-            x = max(0.0, x)  # Ensure x is non-negative
-            Re_theta = max(1.0, Re_theta)  # Ensure Re_theta is positive
-            H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
-
-            # Skip transition check near leading edge
-            if x < 0.05:
-                return False
-
-            try:
-                # Compute critical Reynolds number
-                Re_theta_crit = self.model.critical_reynolds_number(H, dUe_dx)
-                Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
-
-                # Check for bypass transition
-                if Re_theta > Re_theta_crit:
-                    logger.info(f"Bypass transition detected at x = {x:.3f}")
-                    self.transition_occurred = True
-                    return True
-            except Exception as e:
-                logger.warning(f"Error in bypass transition check: {str(e)}")
-
-            # Check for separation-induced transition
-            if H > 3.5 and Re_theta > 200:
-                logger.info(f"Separation-induced transition detected at x = {x:.3f}")
-                self.transition_occurred = True
-                return True
-        except Exception as e:
-            logger.warning(f"Transition check failed: {str(e)}")
-
-        return False
+    # TODO: This method is deprecated. Its logic for bypass/separation checks should be integrated into or superseded by the n-factor accumulation in predict_transition.
+    # def check_transition(self, x: float, Re_theta: float, H: float, dUe_dx: float) -> bool:
+    #     """Check if transition occurs at the current location.
+    #
+    #     Args:
+    #         x: Streamwise coordinate.
+    #         Re_theta: Reynolds number based on momentum thickness.
+    #         H: Shape parameter.
+    #         dUe_dx: Edge velocity gradient.
+    #
+    #     Returns:
+    #         True if transition occurs, False otherwise.
+    #     """
+    #     try:
+    #         # Ensure inputs are in reasonable ranges
+    #         x = max(0.0, x)  # Ensure x is non-negative
+    #         Re_theta = max(1.0, Re_theta)  # Ensure Re_theta is positive
+    #         H = max(1.05, min(4.0, H))  # Constrain H to reasonable values
+    #
+    #         # Skip transition check near leading edge
+    #         if x < 0.05:
+    #             return False
+    #
+    #         try:
+    #             # Compute critical Reynolds number
+    #             Re_theta_crit = self.model.critical_reynolds_number(H, dUe_dx)
+    #             Re_theta_crit = max(1.0, Re_theta_crit)  # Ensure positive critical Reynolds number
+    #
+    #             # Check for bypass transition
+    #             if Re_theta > Re_theta_crit:
+    #                 logger.info(f"Bypass transition detected at x = {x:.3f}")
+    #                 self.transition_occurred = True
+    #                 return True
+    #         except Exception as e:
+    #             logger.warning(f"Error in bypass transition check: {str(e)}")
+    #
+    #         # Check for separation-induced transition
+    #         if H > 3.5 and Re_theta > 200:
+    #             logger.info(f"Separation-induced transition detected at x = {x:.3f}")
+    #             self.transition_occurred = True
+    #             return True
+    #     except Exception as e:
+    #         logger.warning(f"Transition check failed: {str(e)}")
+    #
+    #     return False
 
     def is_transition(self) -> bool:
         """
@@ -620,7 +733,7 @@ class TransitionPredictor:
         }
 
     def predict_transition(self, x: np.ndarray, H: np.ndarray, Re_theta: np.ndarray,
-                         edge_velocity: np.ndarray) -> Dict[str, Any]:
+                         theta_values: np.ndarray, edge_velocity: np.ndarray) -> Dict[str, Any]:
         """
         Run transition prediction on a given boundary layer solution.
 
@@ -628,6 +741,7 @@ class TransitionPredictor:
             x: Streamwise coordinate array.
             H: Shape parameter array.
             Re_theta: Reynolds number based on momentum thickness array.
+            theta_values: Momentum thickness array.
             edge_velocity: Edge velocity array.
 
         Returns:
@@ -645,11 +759,14 @@ class TransitionPredictor:
         transition_x = None
 
         # Check array lengths
-        if len(H) != n_points or len(Re_theta) != n_points or len(edge_velocity) != n_points:
-            raise ValueError("All input arrays must have the same length")
+        if not (len(H) == n_points and len(Re_theta) == n_points and \
+                len(theta_values) == n_points and len(edge_velocity) == n_points):
+            raise ValueError("All input arrays (x, H, Re_theta, theta_values, edge_velocity) must have the same length")
 
         # Calculate critical n-factor
-        n_crit = -8.43 - 2.4 * np.log(self.model.turbulence_level / 100.0)
+        # Ensure turbulence_level is valid for log
+        safe_turbulence_level = max(self.model.turbulence_level, 1e-9) # Avoid log(0) or log(<0)
+        n_crit = -8.43 - 2.4 * np.log(safe_turbulence_level / 100.0)
 
         # Loop over all points
         for i in range(1, n_points):
@@ -669,10 +786,11 @@ class TransitionPredictor:
 
             # Update n-factor
             n_factor[i] = self.model.update_amplification_factor(
-                n_factor[i-1], rate, x[i] - x[i-1], edge_vel_ratio
+                n_factor[i-1], rate, x[i] - x[i-1], theta_values[i], edge_vel_ratio
             )
 
             # Check for transition
+            # TODO: Review the necessity of these heuristic checks (Re_theta > 2*Re_theta_crit or H > 3.5). Ideally, a robust n-factor method should capture these phenomena.
             if n_factor[i] >= n_crit or Re_theta[i] > 2*Re_theta_crit or H[i] > 3.5:
                 transition_occurred = True
                 transition_index = i

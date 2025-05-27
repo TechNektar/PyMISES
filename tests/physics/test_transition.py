@@ -71,27 +71,37 @@ class TestModifiedAGSTransition(unittest.TestCase):
         """Test amplification factor update with edge velocity correction."""
         # Initial n-factor
         n = 3.0
+        theta_val = 0.001
         
         # Case 1: Constant edge velocity (ratio = 1.0)
+        # dn = (amplification_rate * dx / theta_val) - dln_ue
+        # dln_ue = log(1.0) = 0
+        # dn = (0.1 * 0.01 / 0.001) = 1.0
+        # n_new = 3.0 + 1.0 = 4.0
         n_updated1 = self.transition_model.update_amplification_factor(
-            n, amplification_rate=0.1, dx=0.01, edge_velocity_ratio=1.0
+            n, amplification_rate=0.1, dx=0.01, theta=theta_val, edge_velocity_ratio=1.0
         )
-        # Expected: n + 0.1*0.01 = 3.001
-        self.assertAlmostEqual(n_updated1, 3.001, places=6)
+        self.assertAlmostEqual(n_updated1, 4.0, places=6)
         
-        # Case 2: Accelerating flow (ratio > 1.0) - should decrease n-factor
+        # Case 2: Accelerating flow (ratio > 1.0) - should decrease n-factor relative to dn contribution
+        # dln_ue = log(1.1) approx 0.0953
+        # dn = 1.0 - 0.0953 = 0.9047
+        # n_new = 3.0 + 0.9047 = 3.9047
         n_updated2 = self.transition_model.update_amplification_factor(
-            n, amplification_rate=0.1, dx=0.01, edge_velocity_ratio=1.1
+            n, amplification_rate=0.1, dx=0.01, theta=theta_val, edge_velocity_ratio=1.1
         )
-        # Logarithm term should produce negative contribution
-        self.assertLess(n_updated2, 3.001)
+        # Expected n_updated2 is 3.9047..., which is less than 4.0
+        self.assertLess(n_updated2, 4.0)
         
-        # Case 3: Decelerating flow (ratio < 1.0) - should increase n-factor
+        # Case 3: Decelerating flow (ratio < 1.0) - should increase n-factor relative to dn contribution
+        # dln_ue = log(0.9) approx -0.10536
+        # dn = 1.0 - (-0.10536) = 1.10536
+        # n_new = 3.0 + 1.10536 = 4.10536
         n_updated3 = self.transition_model.update_amplification_factor(
-            n, amplification_rate=0.1, dx=0.01, edge_velocity_ratio=0.9
+            n, amplification_rate=0.1, dx=0.01, theta=theta_val, edge_velocity_ratio=0.9
         )
-        # Logarithm term should produce positive contribution
-        self.assertGreater(n_updated3, 3.001)
+        # Expected n_updated3 is 4.10536..., which is greater than 4.0
+        self.assertGreater(n_updated3, 4.0)
 
 class TestTransitionPredictor(unittest.TestCase):
     """Test the TransitionPredictor class."""
@@ -102,6 +112,7 @@ class TestTransitionPredictor(unittest.TestCase):
         self.H = np.ones_like(self.x) * 2.3  # Constant shape parameter for testing
         self.Re_theta = np.linspace(100, 1000, 101)  # Increasing Reynolds number
         self.edge_velocity = np.ones_like(self.x)  # Constant edge velocity for simplicity
+        self.theta_values = np.ones_like(self.x) * 0.001 # Constant momentum thickness for simplicity
         
         # Create transition predictor
         self.predictor = TransitionPredictor(
@@ -111,10 +122,13 @@ class TestTransitionPredictor(unittest.TestCase):
     
     def test_initialization(self):
         """Test initialization of the predictor."""
-        self.predictor.initialize(self.x, self.H)
+        # The initialize method now expects x, edge_velocity, and theta_values
+        self.predictor.initialize(self.x, self.edge_velocity, self.theta_values)
         
         # Check if arrays are properly initialized
         self.assertEqual(len(self.predictor.x), len(self.x))
+        self.assertEqual(len(self.predictor.edge_velocity), len(self.edge_velocity))
+        self.assertEqual(len(self.predictor.theta), len(self.theta_values))
         self.assertEqual(len(self.predictor.n_factor), len(self.x))
         self.assertEqual(self.predictor.n_factor[0], 0.0)  # Initial n-factor should be zero
         self.assertFalse(self.predictor.transition_occurred)
@@ -122,8 +136,11 @@ class TestTransitionPredictor(unittest.TestCase):
     
     def test_predict_transition(self):
         """Test transition prediction for a Blasius boundary layer."""
+        # Initialize the predictor first (as it's done in BoundaryLayerSolver before calling predict_transition)
+        self.predictor.initialize(self.x, self.edge_velocity, self.theta_values)
+        
         result = self.predictor.predict_transition(
-            self.x, self.H, self.Re_theta, self.edge_velocity
+            self.x, self.H, self.Re_theta, self.theta_values, self.edge_velocity
         )
         
         # Check if transition is detected for this case

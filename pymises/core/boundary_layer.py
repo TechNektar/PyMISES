@@ -70,7 +70,9 @@ class BoundaryLayerSolver:
             'CT': np.zeros(self.n_points),  # Shear stress coefficient
             'CT_eq': np.zeros(self.n_points),  # Equilibrium shear stress coefficient
             'state': np.zeros(self.n_points, dtype=int),  # Flow state (0=laminar, 1=transitional, 2=turbulent)
-            'transition_progress': np.zeros(self.n_points)  # Transition progress (0=laminar, 1=turbulent)
+            'transition_progress': np.zeros(self.n_points),  # Transition progress (0=laminar, 1=turbulent)
+            'n_factor': np.zeros(self.n_points),  # Amplification factor for transition
+            'amplification_rate': np.zeros(self.n_points)  # Amplification rate for transition
         }
 
         # Initialize closure models
@@ -158,6 +160,19 @@ class BoundaryLayerSolver:
         self.transition_x = None
         self.separation_occurred = False
         self.separation_index = None
+
+        # Initialize n_crit for transition prediction
+        self.n_crit = None
+        if self.transition_predictor is not None and hasattr(self.transition_predictor, 'model') \
+           and hasattr(self.transition_predictor.model, 'turbulence_level'):
+            # Safety clamp turbulence level for log calculation
+            eff_turbulence_level = max(1e-6, min(self.transition_predictor.model.turbulence_level, 0.2))
+            self.n_crit = -8.43 - 2.4 * np.log(eff_turbulence_level / 100.0)
+            logger.info(f"Initialized n_crit = {self.n_crit:.2f} based on turbulence level {eff_turbulence_level:.4f}")
+        elif self.transition_predictor is not None:
+             # Fallback if turbulence_level is not directly accessible in the expected way
+            logger.warning("Transition predictor model or turbulence level not found as expected. n_crit not set.")
+
 
         # Initialize state
         self.initialized = False
@@ -277,47 +292,118 @@ class BoundaryLayerSolver:
         for i in range(1, self.n_points):
             # Get edge velocity ratio (acceleration/deceleration)
             dx = self.x[i] - self.x[i-1]
-            dUe_dx = (self.edge_velocity[i] - self.edge_velocity[i-1]) / dx
+            # dUe_dx = (self.edge_velocity[i] - self.edge_velocity[i-1]) / dx # dUe_dx is calculated inside step solvers
 
-            # Get Reynolds number based on momentum thickness
-            Re_theta = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1]
+            # Get Reynolds number based on momentum thickness (using previous step's theta for stability)
+            # Re_theta = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1] # Re_theta used in step solvers
 
             # Check for transition if in laminar state and transition predictor exists
-            if self.solution['state'][i-1] == 0 and self.transition_predictor is not None:  # Laminar
-                # Check for transition
-                if self.transition_predictor.check_transition(
-                    self.x[i], Re_theta, self.solution['H'][i-1], dUe_dx
-                ):
-                    # Set transition index and progress
-                    self.transition_index = i
+            if self.solution['state'][i-1] == 0 and self.transition_predictor is not None and self.n_crit is not None:  # Laminar
+                H_prev = self.solution['H'][i-1]
+                theta_prev = max(self.solution['theta'][i-1], 1e-9) # Avoid division by zero
+                
+                Re_theta_prev = self.reynolds_number * self.edge_velocity[i-1] * theta_prev
+                
+                # Use turbulence level from the model for critical Reynolds number calculation
+                turbulence_level_model = self.transition_predictor.model.turbulence_level
+                Re_theta_crit = self.transition_predictor.model.critical_reynolds_number(H_prev, turbulence_level_model)
+                
+                edge_vel_ratio = self.edge_velocity[i] / max(self.edge_velocity[i-1], 1e-6)
+                
+                amp_rate = self.transition_predictor.model.amplification_rate(H_prev, Re_theta_prev, Re_theta_crit)
+                self.solution['amplification_rate'][i] = amp_rate
+                
+                self.solution['n_factor'][i] = self.transition_predictor.model.update_amplification_factor(
+                    self.solution['n_factor'][i-1], amp_rate, dx, theta_prev, edge_vel_ratio
+                )
+
+                transition_triggered = False
+                if self.solution['n_factor'][i] >= self.n_crit:
+                    transition_triggered = True
+                    logger.info(f"N-factor transition triggered at x = {self.x[i]:.4f}, n_factor = {self.solution['n_factor'][i]:.2f}, n_crit = {self.n_crit:.2f}")
+
+                # TODO: Review the necessity of these heuristic checks. Ideally, a robust n-factor method should capture these phenomena.
+                if not transition_triggered and Re_theta_prev > 2 * Re_theta_crit:
+                    transition_triggered = True
+                    logger.info(f"Heuristic Re_theta > 2*Re_theta_crit transition triggered at x = {self.x[i]:.4f}")
+                
+                if not transition_triggered and H_prev > 3.5: # Typically for laminar separation leading to transition
+                    transition_triggered = True
+                    logger.info(f"Heuristic H_prev > 3.5 transition triggered at x = {self.x[i]:.4f}")
+
+                if transition_triggered:
                     self.solution['state'][i] = 1  # Transitional
-                    self.solution['transition_progress'][i] = 0.0
+                    self.transition_index = i
+                    self.transition_x = self.x[i]
+                    self.transition_occurred = True
+                    self.solution['transition_progress'][i] = 0.0 # Start of transition
+                    # Since it's now transitional, solve the first transitional step
+                    Re_theta_curr = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1] # Re-evaluate Re_theta for the current point
+                    self._solve_transitional_step(i, dx, Re_theta_curr, mach=0.0)
                 else:
                     # Stay laminar
                     self.solution['state'][i] = 0
                     self._solve_laminar_step(i)
             elif self.solution['state'][i-1] == 1:  # Transitional
                 # Update transition progress
+                Re_theta_curr = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1]
                 if self.transition_index is not None:
-                    # Estimate transition length (about 20% of distance from leading edge)
-                    trans_length = 0.2 * self.x[self.transition_index]
-                    trans_start = self.x[self.transition_index]
-                    self.solution['transition_progress'][i] = min(1.0, max(0.0, (self.x[i] - trans_start) / trans_length))
+                    # Estimate transition length (can be made more sophisticated)
+                    # For simplicity, let's assume a fixed number of points or distance for transition
+                    # Or, use a model for transition length, e.g., related to Re_theta_crit or x_transition
+                    # A common rough estimate for transition length is proportional to momentum thickness at transition onset
+                    # or a certain multiple of x_crit.
+                    # For now, let's use a simple progress based on streamwise distance, assuming it completes over a certain length.
+                    # Example: transition completes over a length of 0.2 * x_crit (can be refined)
+                    trans_length_factor = self.config.get('transition_length_factor', 20.0) # Factor times theta_crit
+                    # Using a more robust length based on x_transition, e.g. 20-50% of x_transition
+                    # This needs careful calibration. Let's use a simpler fixed dx based progress for now.
+                    # Assuming transition completes over roughly 10-20 steps or a fraction of chord.
+                    # Let's use a simple model: progress increases by a fixed amount per step, e.g., 0.1
+                    
+                    # A more common approach for transition length L_tr: L_tr = C * Re_theta_tr * theta_tr / (Ue_tr/nu)
+                    # Or simpler: L_tr related to x_tr. Say, L_tr = 0.5 * x_tr
+                    # For this example, let's make it simpler: transition completes over a certain number of points or fraction of x.
+                    # Let's use a fixed increment for transition_progress for now.
+                    # This ensures progress towards full turbulence.
+                    # A better model would compute actual intermittency factor gamma.
+                    
+                    # Calculate transition progress. Let's assume transition completes over a length
+                    # proportional to the momentum thickness at transition or x-location of transition.
+                    # For now, a simple linear progression over a typical transition length.
+                    # This is a placeholder for a more physical intermittency model.
+                    # Let's assume transition length is related to Re_theta_crit
+                    # For now, let's assume a fixed number of steps for transition for simplicity.
+                    # For example, transition completes in `N_trans_steps` points.
+                    N_trans_steps = self.config.get('transition_steps', 20) # Number of points for transition
+                    current_trans_step = i - self.transition_index
+                    self.solution['transition_progress'][i] = min(1.0, current_trans_step / N_trans_steps)
 
                     # Check if transition is complete
                     if self.solution['transition_progress'][i] >= 1.0:
                         self.solution['state'][i] = 2  # Turbulent
-                        self._solve_turbulent_step(i, dx, Re_theta, mach=0.0)
+                        self._solve_turbulent_step(i, dx, Re_theta_curr, mach=0.0)
                     else:
                         self.solution['state'][i] = 1  # Still transitional
-                        self._solve_transitional_step(i, dx, Re_theta, mach=0.0)
+                        self._solve_transitional_step(i, dx, Re_theta_curr, mach=0.0)
                 else:
-                    # Shouldn't happen, but handle gracefully
+                    # Should not happen if transition_index is always set when state becomes 1
+                    logger.warning("In transitional state but transition_index is None. Defaulting to turbulent.")
                     self.solution['state'][i] = 2  # Go turbulent
-                    self._solve_turbulent_step(i, dx, Re_theta, mach=0.0)
-            else:  # Turbulent
-                self.solution['state'][i] = 2
-                self._solve_turbulent_step(i, dx, Re_theta, mach=0.0)
+                    Re_theta_curr = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1]
+                    self._solve_turbulent_step(i, dx, Re_theta_curr, mach=0.0)
+            else:  # Turbulent (or laminar/no predictor)
+                # If state[i-1] was 0 but no predictor, it remains 0 (handled by _solve_laminar_step)
+                # If state[i-1] was 2, it remains 2 (handled by _solve_turbulent_step)
+                current_state_prev = self.solution['state'][i-1]
+                if current_state_prev == 0 : # Laminar, but no predictor or n_crit not set
+                    self.solution['state'][i] = 0
+                    self._solve_laminar_step(i)
+                elif current_state_prev == 2: # Turbulent
+                    self.solution['state'][i] = 2
+                    Re_theta_curr = self.reynolds_number * self.edge_velocity[i] * self.solution['theta'][i-1]
+                    self._solve_turbulent_step(i, dx, Re_theta_curr, mach=0.0)
+                # Note: if it was state 1 (transitional) but self.transition_index was None, it's handled above.
 
         return self.solution
 
@@ -748,117 +834,7 @@ class BoundaryLayerSolver:
         # Keep state as transitional
         self.solution['state'][i] = 1
 
-    def _check_transition(self, i: int) -> bool:
-        """Check for boundary layer transition.
-
-        Args:
-            i: Current point index.
-
-        Returns:
-            True if transition occurred, False otherwise.
-        """
-        # Skip if transition already occurred or no transition predictor
-        if self.transition_occurred or self.transition_predictor is None:
-            return False
-
-        try:
-            # Get current shape parameter and edge velocity
-            H = self.solution['H'][i]
-            Ue = self.edge_velocity[i]
-
-            # Ensure H is in a reasonable range to prevent numerical issues
-            H = max(1.05, min(4.0, H))
-
-            # Ensure Ue is positive to prevent numerical issues
-            Ue = max(1e-8, Ue)
-
-            # Check for bypass transition based on Reynolds number and shape parameter
-            Re_x = self.reynolds_number * self.x[i] * Ue
-            if Re_x > 3.5e6 and H > 2.5:
-                try:
-                    # Initialize turbulent shear stress
-                    Re_theta = self.reynolds_number * Ue * self.solution['theta'][i]
-                    Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
-
-                    closure = self.turbulent_closure.compute_closure_relations(H, Re_theta, 0.0)
-                    self.solution['CT'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                    self.solution['CT_eq'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                except Exception as e:
-                    # If closure calculation fails, use default values
-                    logger.warning(f"Closure calculation failed at transition: {str(e)}")
-                    self.solution['CT'][i] = 0.01  # Default value
-                    self.solution['CT_eq'][i] = 0.01  # Default value
-
-                # Set all downstream points to transitional state
-                self.solution['state'][i:] = 1
-                self.transition_occurred = True
-                self.transition_index = i
-                self.transition_x = self.x[i]
-                logger.info(f"Bypass transition detected at x = {self.x[i]:.3f}")
-                return True
-
-            try:
-                # Update transition predictor with error handling
-                self.transition_predictor.update(i, H, Ue)
-
-                # Check for natural transition
-                if self.transition_predictor.is_transition():
-                    try:
-                        # Initialize turbulent shear stress
-                        Re_theta = self.reynolds_number * Ue * self.solution['theta'][i]
-                        Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
-
-                        closure = self.turbulent_closure.compute_closure_relations(H, Re_theta, 0.0)
-                        self.solution['CT'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                        self.solution['CT_eq'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                    except Exception as e:
-                        # If closure calculation fails, use default values
-                        logger.warning(f"Closure calculation failed at transition: {str(e)}")
-                        self.solution['CT'][i] = 0.01  # Default value
-                        self.solution['CT_eq'][i] = 0.01  # Default value
-
-                    # Set all downstream points to transitional state
-                    self.solution['state'][i:] = 1
-                    self.transition_occurred = True
-                    self.transition_index = i
-                    self.transition_x = self.x[i]
-                    logger.info(f"Natural transition detected at x = {self.x[i]:.3f}")
-                    return True
-            except Exception as e:
-                logger.warning(f"Transition prediction failed: {str(e)}")
-                # Continue without transition
-        except Exception as e:
-            logger.warning(f"Transition check failed: {str(e)}")
-            # Continue without transition
-
-        # Check for separation-induced transition
-        try:
-            if H > 3.5:  # Strong separation
-                try:
-                    # Initialize turbulent shear stress
-                    Re_theta = self.reynolds_number * Ue * self.solution['theta'][i]
-                    Re_theta = max(1.0, Re_theta)  # Ensure positive Reynolds number
-
-                    closure = self.turbulent_closure.compute_closure_relations(H, Re_theta, 0.0)
-                    self.solution['CT'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                    self.solution['CT_eq'][i] = closure.get('CT_eq', 0.01)  # Use default if missing
-                except Exception as e:
-                    # If closure calculation fails, use default values
-                    logger.warning(f"Closure calculation failed at separation-induced transition: {str(e)}")
-                    self.solution['CT'][i] = 0.01  # Default value
-                    self.solution['CT_eq'][i] = 0.01  # Default value
-
-                # Set all downstream points to transitional state
-                self.solution['state'][i:] = 1
-                self.transition_occurred = True
-                self.transition_index = i
-                self.transition_x = self.x[i]
-                logger.info(f"Separation-induced transition detected at x = {self.x[i]:.3f}")
-                return True
-        except Exception as e:
-            logger.warning(f"Separation-induced transition check failed: {str(e)}")
-
-        return False
+    # The _check_transition method is now removed as its logic is integrated into solve().
 
     def _check_transition_completion(self, i: int):
         """Check if transition process is complete.

@@ -237,62 +237,58 @@ class TestBoundaryLayerSolver(unittest.TestCase):
         # Initialize solution
         bl_solver.initialize_solution()
         
-        # Manually simulate transition based on Reynolds number
-        transition_detected = False
-        transition_index = None
+        # Solve the boundary layer equations, which should include automatic transition detection
+        solution = bl_solver.solve()
         
-        # Process one point at a time until transition is detected
-        for i in range(1, n_points):
-            # Calculate Reynolds number based on x
-            Re_x = reynolds * x[i]
-            
-            # For simplified testing, we'll manually detect transition
-            # based on a critical Reynolds number
-            if Re_x > 5e5 and not transition_detected:
-                # Mark the transition point
-                transition_detected = True
-                transition_index = i
-                bl_solver.transition_index = i
-                bl_solver.transition_occurred = True
-                bl_solver.transition_x = x[i]
-                print(f"\nTransition detected at x = {x[i]:.4f}, Re_x = {Re_x:.1e}")
-                
-                # Set state to transitional
-                bl_solver.solution['state'][i:] = 1  # Transitional state
-                
-                # Process a few more points to capture turbulent region
-                for j in range(i, min(i + 20, n_points)):
-                    if j < i + 10:
-                        # Still transitional
-                        bl_solver.solution['state'][j] = 1
-                        # Calculate position in transition region (0-1)
-                        progress = (j - i) / 10.0
-                        bl_solver.solution['transition_progress'][j] = progress
-                        # Interpolate shape factor from laminar to turbulent
-                        bl_solver.solution['H'][j] = 2.59 * (1 - progress) + 1.4 * progress
-                    else:
-                        # Fully turbulent
-                        bl_solver.solution['state'][j] = 2
-                        bl_solver.solution['H'][j] = 1.4  # Typical turbulent value
-                break
-            
-            # Otherwise, treat as laminar
-            bl_solver._solve_laminar_step(i)
+        # Assert that transition was automatically detected
+        self.assertTrue(bl_solver.transition_occurred, "Transition should have been automatically detected by the solver.")
+        self.assertIsNotNone(bl_solver.transition_index, "Transition index should be set.")
+        self.assertIsNotNone(bl_solver.transition_x, "Transition x location should be set.")
+        self.assertGreater(bl_solver.transition_index, 0, "Transition should occur after the first point.")
+        self.assertLess(bl_solver.transition_index, n_points -1, "Transition should occur before the last point for this test case.")
+
+        # Verify n-factor accumulation
+        # Ensure n_factor is present in the solution
+        self.assertIn('n_factor', solution, "n_factor should be in the solution dictionary.")
         
-        # Assert that transition was detected
-        self.assertTrue(transition_detected, "Transition should have been detected")
+        # n-factor should accumulate before transition. 
+        # Need to ensure transition_index is valid and there are points before it.
+        if bl_solver.transition_index > 0 :
+             self.assertTrue(np.any(solution['n_factor'][:bl_solver.transition_index] > 1e-9), # Check for any positive n-factor, not just >0 due to potential float precision
+                             "n-factor should accumulate (be > 0) at some point before transition.")
         
+        # n-factor at transition should be >= n_crit (if n_crit is defined)
+        if bl_solver.n_crit is not None:
+            self.assertGreaterEqual(solution['n_factor'][bl_solver.transition_index], bl_solver.n_crit,
+                                    "n-factor at transition should be >= n_crit.")
+        else:
+            # If n_crit is None (e.g. if transition_predictor was None, which is not the case here but good for robustness)
+            # then this specific check cannot be performed.
+            # However, for this test, bl_solver is configured with a transition_model, so n_crit should be set.
+            self.assertIsNotNone(bl_solver.n_crit, "n_crit should be defined for this test case.")
+
+
         # Calculate averages before and after transition for testing
-        if transition_index:
-            before_index = max(0, transition_index - 10)
-            after_index = min(transition_index + 15, n_points)
+        if bl_solver.transition_index is not None:
+            # Ensure indices are valid and there are enough points for averaging
+            # Define averaging range, e.g., 10 points before and 5 points after transition starts, up to 15 points into turbulent region
+            laminar_avg_start = max(0, bl_solver.transition_index - 10)
+            laminar_avg_end = bl_solver.transition_index # Average up to the point of transition
             
-            # Shape factor should decrease after transition
-            avg_h_before = np.mean(bl_solver.solution['H'][before_index:transition_index])
-            avg_h_after = np.mean(bl_solver.solution['H'][transition_index+5:after_index])
-            print(f"Average H before transition: {avg_h_before:.4f}")
-            print(f"Average H after transition: {avg_h_after:.4f}")
-            self.assertGreater(avg_h_before, avg_h_after)
+            turb_avg_start = min(bl_solver.transition_index + 5, n_points -1) # Start a bit after transition point
+            turb_avg_end = min(bl_solver.transition_index + 15, n_points) # Average over a small turbulent region
+            
+            if laminar_avg_start < laminar_avg_end and turb_avg_start < turb_avg_end : # Check if there are points to average
+                avg_h_before = np.mean(solution['H'][laminar_avg_start:laminar_avg_end])
+                avg_h_after = np.mean(solution['H'][turb_avg_start:turb_avg_end])
+                print(f"Automatically predicted transition_x: {bl_solver.transition_x:.4f}")
+                print(f"Average H before transition ({laminar_avg_start}-{laminar_avg_end}): {avg_h_before:.4f}")
+                print(f"Average H after transition ({turb_avg_start}-{turb_avg_end}): {avg_h_after:.4f}")
+                self.assertGreater(avg_h_before, avg_h_after, "Shape factor H should decrease after transition.")
+            else:
+                print("Not enough points around transition to average H values or transition at extreme ends.")
+        else:
+            self.fail("Transition did not occur, cannot check H factor change.")
 
 class TestBoundaryLayerFactory(unittest.TestCase):
     """Test the BoundaryLayerFactory class."""
