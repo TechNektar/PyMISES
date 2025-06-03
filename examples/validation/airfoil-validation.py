@@ -60,7 +60,7 @@ def analyze_airfoil(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=5e6):
         airfoil = AirfoilGeometry.create_naca(airfoil_name, n_points=101)
     else:
         # Load coordinates from file
-        airfoil = AirfoilGeometry.load_from_file(f'{airfoil_name}.dat')
+        airfoil = AirfoilGeometry.import_from_file(f'{airfoil_name}.dat')
     
     # 2. Generate computational grid
     print("Generating computational grid...")

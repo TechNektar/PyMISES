@@ -11,6 +11,8 @@ from matplotlib import cm
 import matplotlib.ticker as ticker
 from typing import Dict, List, Tuple, Optional, Union
 
+from pymises.core.geometry import AirfoilGeometry
+
 def plot_pressure(solution: Dict, geometry, fig=None, ax=None):
     """
     Plot pressure distribution around an airfoil or blade.
@@ -59,7 +61,7 @@ def plot_pressure(solution: Dict, geometry, fig=None, ax=None):
     y = grid_y[surface_indices]
     
     # Sort points by x-coordinate for airfoil or cascade
-    if isinstance(geometry, type(geometry).__name__ == 'AirfoilGeometry'):
+    if isinstance(geometry, AirfoilGeometry):
         # For airfoil, separate upper and lower surfaces
         # Assuming leading edge is at min(x) and trailing edge at max(x)
         le_idx = np.argmin(x)

@@ -67,7 +67,7 @@ class AirfoilOptimizer:
         if base_airfoil.lower().startswith('naca'):
             self.base_airfoil = AirfoilGeometry.create_naca(base_airfoil, n_points=101)
         else:
-            self.base_airfoil = AirfoilGeometry.load_from_file(f'{base_airfoil}.dat')
+            self.base_airfoil = AirfoilGeometry.import_from_file(f'{base_airfoil}.dat')
         
         # Create Hicks-Henne bump functions
         self._create_bump_functions()

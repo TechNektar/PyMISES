@@ -107,7 +107,7 @@ def analyze_transonic_airfoil(airfoil_name, mach, alpha, reynolds, grid_density=
         # Load coordinates from file
         geometry_file = Path(__file__).parent / 'data' / f'{airfoil_name}.dat'
         if geometry_file.exists():
-            airfoil = AirfoilGeometry.load_from_file(geometry_file)
+            airfoil = AirfoilGeometry.import_from_file(geometry_file)
         else:
             # Fallback to NACA 0012 if file not found
             print(f"Warning: Airfoil geometry file not found: {geometry_file}")
