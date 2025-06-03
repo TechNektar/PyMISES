@@ -126,12 +126,8 @@ class EulerSolver:
         ni, nj = self.grid.ni, self.grid.nj
 
         # Primary variables
-        density = np.ones((ni, nj)) * rho
-        streamline_pos = np.zeros((ni, nj, 2))  # x, y position of streamline
-        for i in range(ni):
-            for j in range(nj):
-                streamline_pos[i, j, 0] = self.grid.x[i, j]
-                streamline_pos[i, j, 1] = self.grid.y[i, j]
+        density = np.full((ni, nj), rho)
+        streamline_pos = np.dstack((self.grid.x, self.grid.y))
 
         # Secondary variables
         velocity = np.zeros((ni, nj, 2))
@@ -145,27 +141,20 @@ class EulerSolver:
 
         # Streamtube properties
         mass_flux = np.zeros(nj)
-        for j in range(nj):
-            # Initial estimate of mass flux in each streamtube
-            # For a uniform flow, this is proportional to the streamtube width
-            # We'll use the initial grid spacing as an approximation
-            if j < nj - 1:
-                tube_width = np.sqrt((self.grid.x[0, j+1] - self.grid.x[0, j])**2 +
-                                    (self.grid.y[0, j+1] - self.grid.y[0, j])**2)
-                mass_flux[j] = rho * v_mag * tube_width
-            else:
-                # For the last streamtube, use the same mass flux as the second-to-last
-                mass_flux[j] = mass_flux[j-1] if j > 0 else rho * v_mag
+        if nj > 1:
+            tube_widths = np.sqrt(np.diff(self.grid.x[0, :]) ** 2 +
+                                 np.diff(self.grid.y[0, :]) ** 2)
+            mass_flux[:-1] = rho * v_mag * tube_widths
+            mass_flux[-1] = mass_flux[-2]
+        else:
+            mass_flux[0] = rho * v_mag
 
-        stagnation_enthalpy = np.ones(nj) * h0
+        stagnation_enthalpy = np.full(nj, h0)
 
         # Calculate energy (e = p/(gamma-1)*rho + 0.5*v^2)
-        energy = np.zeros((ni, nj))
-        for i in range(ni):
-            for j in range(nj):
-                v_mag_squared = velocity[i, j, 0]**2 + velocity[i, j, 1]**2
-                internal_energy = pressure[i, j] / ((self.thermo.gamma - 1.0) * density[i, j])
-                energy[i, j] = internal_energy + 0.5 * v_mag_squared
+        v_mag_squared = velocity[:, :, 0]**2 + velocity[:, :, 1]**2
+        internal_energy = pressure / ((self.thermo.gamma - 1.0) * density)
+        energy = internal_energy + 0.5 * v_mag_squared
 
         # Compute additional velocity components for convenience
         velocity_x = velocity[:, :, 0]

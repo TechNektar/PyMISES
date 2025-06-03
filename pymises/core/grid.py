@@ -1082,37 +1082,31 @@ class GridGenerator:
             y[:, 0] = np.interp(t_grid, t_blade, blade.y)
         
         # Create radial lines emanating from the airfoil to the far field
-        for i in range(self.ni):
-            # Vector from airfoil center to airfoil point
-            r_vector = np.array([x[i, 0], y[i, 0]]) - (le + te) / 2
-            
-            # Normalize and scale to far field distance
-            if np.linalg.norm(r_vector) > 0:
-                r_unit = r_vector / np.linalg.norm(r_vector)
-                far_point = (le + te) / 2 + far_field_radius * r_unit
-            else:
-                # Handle zero-length vector (shouldn't happen with proper coordinates)
-                far_point = np.array([x[i, 0] + far_field_radius, y[i, 0]])
-            
-            # Calculate points along the radial line with clustering towards the wall
-            for j in range(1, self.nj):
-                # Normalized coordinate with clustering
-                t = j / (self.nj - 1)
-                
-                # Apply clustering based on specified method
-                if self.clustering_method == 'tanh':
-                    beta = 5.0
-                    alpha = self.wall_clustering * beta
-                    t_clustered = np.tanh(alpha * t) / np.tanh(alpha)
-                elif self.clustering_method == 'exp':
-                    beta = -np.log(self.wall_clustering) if self.wall_clustering > 0 else 3.0
-                    t_clustered = (1 - np.exp(-beta * t)) / (1 - np.exp(-beta))
-                else:  # Sine clustering as default
-                    t_clustered = (1 - np.cos(t * np.pi/2))
-                
-                # Interpolate between airfoil and far field
-                x[i, j] = x[i, 0] + t_clustered * (far_point[0] - x[i, 0])
-                y[i, j] = y[i, 0] + t_clustered * (far_point[1] - y[i, 0])
+        center = (le + te) / 2
+        r_vectors = np.column_stack((x[:, 0], y[:, 0])) - center
+        r_norms = np.linalg.norm(r_vectors, axis=1)
+        r_units = np.zeros_like(r_vectors)
+        non_zero = r_norms > 0
+        r_units[non_zero] = r_vectors[non_zero] / r_norms[non_zero][:, None]
+        far_points = np.column_stack((x[:, 0], y[:, 0]))  # default
+        far_points[non_zero] = center + far_field_radius * r_units[non_zero]
+        far_points[~non_zero, 0] = x[~non_zero, 0] + far_field_radius
+
+        t = np.linspace(0.0, 1.0, self.nj)
+        if self.clustering_method == 'tanh':
+            beta = 5.0
+            alpha = self.wall_clustering * beta
+            t_clustered = np.tanh(alpha * t) / np.tanh(alpha)
+        elif self.clustering_method == 'exp':
+            beta = -np.log(self.wall_clustering) if self.wall_clustering > 0 else 3.0
+            t_clustered = (1 - np.exp(-beta * t)) / (1 - np.exp(-beta))
+        else:  # Sine clustering as default
+            t_clustered = (1 - np.cos(t * np.pi / 2))
+
+        # Interpolate between airfoil surface and far field for all i,j
+        delta = far_points - np.column_stack((x[:, 0], y[:, 0]))
+        x[:, 1:] = x[:, 0, None] + t_clustered[1:] * delta[:, 0, None]
+        y[:, 1:] = y[:, 0, None] + t_clustered[1:] * delta[:, 1, None]
         
         # Create and return the grid
         return StreamlineGrid(x, y, self.config)

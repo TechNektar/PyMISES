@@ -234,7 +234,7 @@ class TestNewtonSolverHardcase:
         # Check if the residual is sufficiently small
         # Note: This test is challenging, so we accept a higher tolerance
         # The original tolerance of 1e-4 was too strict for this problem
-        self.assertLess(convergence_history[-1], 5e-2)
+        assert convergence_history[-1] < 5e-2
         
         # Final solution should approximately satisfy the system
         solution = result['solution']
