@@ -60,7 +60,7 @@ def run_airfoil_inverse_design(base_airfoil='naca0012', target_pressure_file=Non
         airfoil = AirfoilGeometry.create_naca(base_airfoil, n_points=101)
     else:
         # Load coordinates from file
-        airfoil = AirfoilGeometry.load_from_file(f'{base_airfoil}.dat')
+        airfoil = AirfoilGeometry.import_from_file(f'{base_airfoil}.dat')
     
     # 2. Generate computational grid
     print("Generating computational grid...")

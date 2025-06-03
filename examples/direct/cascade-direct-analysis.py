@@ -67,7 +67,7 @@ def run_cascade_analysis(blade_file, inlet_angle=30.0, outlet_angle=None, mach_i
     stagger_rad = np.radians(stagger)
     
     # 1. Create blade geometry
-    blade = BladeGeometry.load_from_file(blade_file)
+    blade = BladeGeometry.import_from_file(blade_file)
     
     # Apply stagger and scaling
     blade.rotate(stagger)
@@ -211,7 +211,7 @@ def run_cascade_analysis(blade_file, inlet_angle=30.0, outlet_angle=None, mach_i
     fig1 = plot_pressure(final_solution, blade)
     fig1.savefig(f'cascade_pressure.png', dpi=300)
     
-    fig2 = plot_grid(grid, final_solution)
+    fig2 = plot_grid(grid)
     fig2.savefig(f'cascade_grid.png', dpi=300)
     
     fig3 = plot_mach_contours(final_solution, grid)
