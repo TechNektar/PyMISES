@@ -121,7 +121,7 @@ def run_vki_turbine_validation(export_dir=None, compare_with_exp=True):
     # Check if geometry file exists
     geometry_file = Path(__file__).parent / 'data' / 'vki_turbine.dat'
     if geometry_file.exists():
-        blade = BladeGeometry.load_from_file(geometry_file)
+        blade = BladeGeometry.import_from_file(geometry_file)
     else:
         # Create simplified blade if VKI file not found
         print(f"Warning: VKI turbine geometry file not found: {geometry_file}")

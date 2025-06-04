@@ -59,7 +59,7 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
         airfoil = AirfoilGeometry.create_naca(airfoil_name, n_points=101)
     else:
         # Load coordinates from file
-        airfoil = AirfoilGeometry.load_from_file(f'{airfoil_name}.dat')
+        airfoil = AirfoilGeometry.import_from_file(f'{airfoil_name}.dat')
 
     # 2. Generate computational grid
     print("Generating computational grid...")
@@ -229,7 +229,7 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
     fig1 = plot_pressure(final_solution, airfoil)
     fig1.savefig(f'{airfoil_name}_M{mach}_a{alpha}_pressure.png', dpi=300)
 
-    fig2 = plot_grid(grid, final_solution)
+    fig2 = plot_grid(grid)
     fig2.savefig(f'{airfoil_name}_M{mach}_a{alpha}_grid.png', dpi=300)
 
     if reynolds > 0 and 'displacement_thickness' in final_solution:

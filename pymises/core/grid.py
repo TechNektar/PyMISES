@@ -269,30 +269,20 @@ class StreamlineGrid:
         if self.ni <= 1 or self.nj <= 1:
             return np.array([])
         
-        # Initialize array
-        areas = np.zeros((self.ni-1, self.nj-1))
-        
-        # Calculate cell areas using cross product method
-        for i in range(self.ni-1):
-            for j in range(self.nj-1):
-                # Cell vertices
-                x_ll = self.x[i, j]        # Lower left
-                y_ll = self.y[i, j]
-                
-                x_lr = self.x[i+1, j]      # Lower right
-                y_lr = self.y[i+1, j]
-                
-                x_ur = self.x[i+1, j+1]    # Upper right
-                y_ur = self.y[i+1, j+1]
-                
-                x_ul = self.x[i, j+1]      # Upper left
-                y_ul = self.y[i, j+1]
-                
-                # Calculate area using the cross product formula
-                # A = 0.5 * |cross_product(diag1, diag2)|
-                area = 0.5 * abs((x_ur - x_ll) * (y_ul - y_lr) - (y_ur - y_ll) * (x_ul - x_lr))
-                areas[i, j] = area
-        
+        # Vectorized area calculation using diagonals of each cell
+        x_ll = self.x[:-1, :-1]
+        y_ll = self.y[:-1, :-1]
+        x_lr = self.x[1:, :-1]
+        y_lr = self.y[1:, :-1]
+        x_ur = self.x[1:, 1:]
+        y_ur = self.y[1:, 1:]
+        x_ul = self.x[:-1, 1:]
+        y_ul = self.y[:-1, 1:]
+
+        areas = 0.5 * np.abs(
+            (x_ur - x_ll) * (y_ul - y_lr) - (y_ur - y_ll) * (x_ul - x_lr)
+        )
+
         return areas
     
     def get_quality_metrics(self) -> Dict[str, Union[np.ndarray, float]]:
@@ -336,84 +326,61 @@ class StreamlineGrid:
         aspect_ratio = np.zeros((self.ni-1, self.nj-1))
         skewness = np.zeros((self.ni-1, self.nj-1))
         smoothness = np.zeros((self.ni-2, self.nj-2))
+
+        # Precompute cell areas once for smoothness and skewness
+        cell_areas = self.get_cell_areas()
         
-        # Calculate orthogonality (dot product of unit vectors)
-        for i in range(self.ni):
-            for j in range(self.nj):
-                # Skip points with zero metrics
-                if np.all(s_metrics[i, j] == 0) or np.all(n_metrics[i, j] == 0):
-                    orthogonality[i, j] = 1.0  # Perfect orthogonality by default
-                    continue
-                
-                # Normalize vectors
-                s_norm = np.sqrt(s_metrics[i, j, 0]**2 + s_metrics[i, j, 1]**2)
-                n_norm = np.sqrt(n_metrics[i, j, 0]**2 + n_metrics[i, j, 1]**2)
-                
-                if s_norm > 0 and n_norm > 0:
-                    s_unit = s_metrics[i, j] / s_norm
-                    n_unit = n_metrics[i, j] / n_norm
-                    
-                    # Dot product (0 for orthogonal vectors)
-                    dot_product = s_unit[0] * n_unit[0] + s_unit[1] * n_unit[1]
-                    
-                    # Deviation from orthogonality (0 for orthogonal, 1 for parallel)
-                    orthogonality[i, j] = abs(dot_product)
-                else:
-                    orthogonality[i, j] = 1.0  # Worst case
+        # Calculate orthogonality using vector operations
+        s_norm = np.linalg.norm(s_metrics, axis=2)
+        n_norm = np.linalg.norm(n_metrics, axis=2)
+        valid = (s_norm > 0) & (n_norm > 0)
+        s_unit = np.zeros_like(s_metrics)
+        n_unit = np.zeros_like(n_metrics)
+        s_unit[valid] = s_metrics[valid] / s_norm[valid, None]
+        n_unit[valid] = n_metrics[valid] / n_norm[valid, None]
+        dot_product = np.sum(s_unit * n_unit, axis=2)
+        orthogonality[:] = 1.0
+        orthogonality[valid] = np.abs(dot_product[valid])
         
         # Calculate aspect ratio
-        for i in range(self.ni-1):
-            for j in range(self.nj-1):
-                # Average streamwise and normal spacing for the cell
-                avg_ds = 0.5 * (ds[i, j] + ds[i, j+1])
-                avg_dn = 0.5 * (dn[i, j] + dn[i+1, j])
-                
-                if avg_dn > 0:
-                    aspect_ratio[i, j] = avg_ds / avg_dn
-                else:
-                    aspect_ratio[i, j] = 1000.0  # Large value for zero normal spacing
+        avg_ds = 0.5 * (ds[:, :-1] + ds[:, 1:])
+        avg_dn = 0.5 * (dn[:-1, :] + dn[1:, :])
+        aspect_ratio[:] = np.where(avg_dn > 0, avg_ds / avg_dn, 1000.0)
         
         # Calculate skewness (deviation from parallelogram)
-        for i in range(self.ni-1):
-            for j in range(self.nj-1):
-                # Cell vertices
-                x_ll = self.x[i, j]        # Lower left
-                y_ll = self.y[i, j]
-                
-                x_lr = self.x[i+1, j]      # Lower right
-                y_lr = self.y[i+1, j]
-                
-                x_ur = self.x[i+1, j+1]    # Upper right
-                y_ur = self.y[i+1, j+1]
-                
-                x_ul = self.x[i, j+1]      # Upper left
-                y_ul = self.y[i, j+1]
-                
-                # Calculate diagonals
-                diag1_length = np.sqrt((x_ur - x_ll)**2 + (y_ur - y_ll)**2)
-                diag2_length = np.sqrt((x_ul - x_lr)**2 + (y_ul - y_lr)**2)
-                
-                # Skewness based on diagonal ratio (1.0 for perfect rectangle)
-                if diag1_length > 0 and diag2_length > 0:
-                    skewness[i, j] = abs(1.0 - min(diag1_length, diag2_length) / max(diag1_length, diag2_length))
-                else:
-                    skewness[i, j] = 1.0  # Worst case
+        x_ll = self.x[:-1, :-1]
+        y_ll = self.y[:-1, :-1]
+        x_lr = self.x[1:, :-1]
+        y_lr = self.y[1:, :-1]
+        x_ur = self.x[1:, 1:]
+        y_ur = self.y[1:, 1:]
+        x_ul = self.x[:-1, 1:]
+        y_ul = self.y[:-1, 1:]
+
+        diag1_length = np.sqrt((x_ur - x_ll) ** 2 + (y_ur - y_ll) ** 2)
+        diag2_length = np.sqrt((x_ul - x_lr) ** 2 + (y_ul - y_lr) ** 2)
+        ratio = np.where(
+            (diag1_length > 0) & (diag2_length > 0),
+            np.abs(1.0 - np.minimum(diag1_length, diag2_length) / np.maximum(diag1_length, diag2_length)),
+            1.0,
+        )
+        skewness[:] = ratio
         
         # Calculate smoothness (variation in cell sizes)
-        for i in range(self.ni-2):
-            for j in range(self.nj-2):
-                # Area ratios between adjacent cells
-                current_area = self.get_cell_areas()[i, j]
-                right_area = self.get_cell_areas()[i+1, j]
-                upper_area = self.get_cell_areas()[i, j+1]
-                
-                # Calculate area ratios
-                if current_area > 0:
-                    ratio1 = min(current_area, right_area) / max(current_area, right_area)
-                    ratio2 = min(current_area, upper_area) / max(current_area, upper_area)
-                    smoothness[i, j] = min(ratio1, ratio2)
-                else:
-                    smoothness[i, j] = 0.0  # Worst case
+        current_area = cell_areas[:-1, :-1]
+        right_area = cell_areas[1:, :-1]
+        upper_area = cell_areas[:-1, 1:]
+        ratio1 = np.where(
+            (current_area > 0) & (right_area > 0),
+            np.minimum(current_area, right_area) / np.maximum(current_area, right_area),
+            0.0,
+        )
+        ratio2 = np.where(
+            (current_area > 0) & (upper_area > 0),
+            np.minimum(current_area, upper_area) / np.maximum(current_area, upper_area),
+            0.0,
+        )
+        smoothness[:] = np.minimum(ratio1, ratio2)
         
         # Calculate summary statistics
         min_orthogonality = np.min(orthogonality) if orthogonality.size > 0 else 1.0
