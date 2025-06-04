@@ -398,6 +398,45 @@ class StreamlineGrid:
             'max_skewness': max_skewness,
             'min_smoothness': min_smoothness
         }
+
+    def get_boundary_indices(self, name: str) -> List[int]:
+        """Return flattened indices for a named boundary.
+
+        Parameters
+        ----------
+        name : str
+            Name of the boundary. Supported values are ``"airfoil"``/``"blade"``
+            (j=0), ``"farfield"`` (j=nj-1), ``"inlet"`` (i=0), ``"outlet"``
+            (i=ni-1), ``"upper_periodic"`` (j=nj-1) and ``"lower_periodic"``
+            (j=0).
+
+        Returns
+        -------
+        List[int]
+            Flattened grid point indices defining the boundary.
+        """
+        if self.ni == 0 or self.nj == 0:
+            return []
+
+        name = name.lower()
+
+        if name in {"airfoil", "blade", "lower_periodic"}:
+            j = 0
+            return (np.arange(self.ni) + self.ni * j).astype(int).tolist()
+
+        if name in {"farfield", "upper_periodic"}:
+            j = self.nj - 1
+            return (np.arange(self.ni) + self.ni * j).astype(int).tolist()
+
+        if name == "inlet" or name == "left":
+            i = 0
+            return (i + self.ni * np.arange(self.nj)).astype(int).tolist()
+
+        if name == "outlet" or name == "right":
+            i = self.ni - 1
+            return (i + self.ni * np.arange(self.nj)).astype(int).tolist()
+
+        raise ValueError(f"Unknown boundary name: {name}")
     
     def redistribute_points_streamwise(self, ni: Optional[int] = None,
                                       clustering: Optional[Dict[str, Any]] = None) -> None:

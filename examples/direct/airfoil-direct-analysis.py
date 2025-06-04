@@ -103,7 +103,7 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
     newton_solver = NewtonSolver(
         residual_function=euler_solver.compute_residuals,
         jacobian_function=euler_solver.compute_jacobian,
-        solution=euler_solver.get_solution()
+        solution=euler_solver.get_solution_vector()
     )
 
     # Run the Newton solver
@@ -114,10 +114,14 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
     )
 
     # Update the Euler solver with the converged solution
-    euler_solver.set_solution(inviscid_solution)
+    euler_solver.set_solution_from_vector(inviscid_solution)
+    inviscid_solution_dict = euler_solver.get_solution()
 
     # Calculate lift and update circulation
-    lift, drag, moment = euler_solver.compute_forces()
+    forces = euler_solver.compute_forces()
+    lift = forces['cl']
+    drag = forces['cd']
+    moment = forces['cm']
     circulation = lift * 1.0  # Simplified relation, proper calculation would use Kutta-Joukowski
 
     # Update far-field boundary condition with calculated circulation
@@ -129,6 +133,8 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
         tolerance=1e-6,
         relaxation=0.8
     )
+    euler_solver.set_solution_from_vector(inviscid_solution)
+    inviscid_solution_dict = euler_solver.get_solution()
 
     # 6. Set up boundary layer solver if Reynolds number is specified
     if reynolds > 0:
@@ -156,13 +162,13 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
         coupled_solver = CoupledSolver(euler_solver, bl_factory)
 
         # Initialize boundary layer solver with inviscid solution
-        coupled_solver.initialize(inviscid_solution)
+        coupled_solver.initialize(inviscid_solution_dict)
 
         # Set up Newton solver for the coupled system
         coupled_newton = NewtonSolver(
             residual_function=coupled_solver.compute_residuals,
             jacobian_function=coupled_solver.compute_jacobian,
-            solution=coupled_solver.get_solution()
+            solution=coupled_solver.get_solution_vector()
         )
 
         # Run the coupled solution
@@ -171,16 +177,15 @@ def run_airfoil_analysis(airfoil_name='naca0012', mach=0.5, alpha=2.0, reynolds=
             tolerance=1e-5,
             relaxation=0.6
         )
-
-        # Get final solution
-        final_solution = viscous_solution
+        coupled_solver.set_solution_from_vector(viscous_solution)
+        final_solution = coupled_solver.get_solution()
 
         # Extract boundary layer properties for visualization
         bl_properties = coupled_solver.get_boundary_layer_properties()
         final_solution.update(bl_properties)
     else:
-        # If inviscid only, the final solution is the inviscid solution
-        final_solution = inviscid_solution
+        # If inviscid only, the final solution is the inviscid solution dictionary
+        final_solution = inviscid_solution_dict
 
     # 7. Post-process and visualize results
     print("Post-processing results...")
